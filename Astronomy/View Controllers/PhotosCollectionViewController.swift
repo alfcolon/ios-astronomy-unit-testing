@@ -29,7 +29,7 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     @IBAction func goToPreviousSol(_ sender: Any?) {
         guard let solDescription = solDescription else { return }
         guard let solDescriptions = roverInfo?.solDescriptions else { return }
-        guard let index = solDescriptions.index(of: solDescription) else { return }
+        guard let index = solDescriptions.firstIndex(of: solDescription) else { return }
         guard index > 0 else { return }
         self.solDescription = solDescriptions[index-1]
     }
@@ -37,7 +37,7 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     @IBAction func goToNextSol(_ sender: Any?) {
         guard let solDescription = solDescription else { return }
         guard let solDescriptions = roverInfo?.solDescriptions else { return }
-        guard let index = solDescriptions.index(of: solDescription) else { return }
+        guard let index = solDescriptions.firstIndex(of: solDescription) else { return }
         guard index < solDescriptions.count - 1 else { return }
         self.solDescription = solDescriptions[index+1]
     }
@@ -103,33 +103,40 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     
     private func configureTitleView() {
         
-        let font = UIFont.systemFont(ofSize: 30)
-        let attrs = [NSAttributedStringKey.font: font]
+//        let font = UIFont.systemFont(ofSize: 30)
+//        let attrs = [NSAttributedStringKey.font: font]
 
-        let prevTitle = NSAttributedString(string: "<", attributes: attrs)
-        let prevButton = UIButton(type: .system)
-        prevButton.accessibilityIdentifier = "PhotosCollectionViewController.PreviousSolButton"
-        prevButton.setAttributedTitle(prevTitle, for: .normal)
-        prevButton.addTarget(self, action: #selector(goToPreviousSol(_:)), for: .touchUpInside)
+//        let prevTitle = NSAttributedString(string: "<", attributes: attrs)
+//        let prevButton = UIButton(type: .system)
+//        prevButton.accessibilityIdentifier = "PhotosCollectionViewController.PreviousSolButton"
+//        prevButton.setAttributedTitle(prevTitle, for: .normal)
+//        prevButton.addTarget(self, action: #selector(goToPreviousSol(_:)), for: .touchUpInside)
         
-        let nextTitle = NSAttributedString(string: ">", attributes: attrs)
-        let nextButton = UIButton(type: .system)
-        nextButton.setAttributedTitle(nextTitle, for: .normal)
-        nextButton.addTarget(self, action: #selector(goToNextSol(_:)), for: .touchUpInside)
-        nextButton.accessibilityIdentifier = "PhotosCollectionViewController.NextSolButton"
+        let prevItem = UIBarButtonItem(title: "<", style: .plain, target: self, action: #selector(goToPreviousSol(_:)))
+        prevItem.accessibilityIdentifier = "PhotosCollectionViewController.PreviousSolButton"
         
-        let stackView = UIStackView(arrangedSubviews: [prevButton, solLabel, nextButton])
-        stackView.axis = .horizontal
-        stackView.alignment = .fill
-        stackView.distribution = .fill
-        stackView.spacing = UIStackView.spacingUseSystem
+//        let nextTitle = NSAttributedString(string: ">", attributes: attrs)
+//        let nextButton = UIButton(type: .system)
+//        nextButton.setAttributedTitle(nextTitle, for: .normal)
+//        nextButton.addTarget(self, action: #selector(goToNextSol(_:)), for: .touchUpInside)
+//        nextButton.accessibilityIdentifier = "PhotosCollectionViewController.NextSolButton"
         
-        navigationItem.titleView = stackView
+        let nextItem = UIBarButtonItem(title: ">", style: .plain, target: self, action: #selector(goToNextSol(_:)))
+        nextItem.accessibilityIdentifier = "PhotosCollectionViewController.NextSolButton"
+        
+//        let stackView = UIStackView(arrangedSubviews: [prevButton, solLabel, nextButton])
+//        stackView.axis = .horizontal
+//        stackView.alignment = .fill
+//        stackView.distribution = .fill
+//        stackView.spacing = UIStackView.spacingUseSystem
+        
+        navigationItem.setLeftBarButton(prevItem, animated: false)
+        navigationItem.setRightBarButton(nextItem, animated: false)
     }
     
     private func updateViews() {
         guard isViewLoaded else { return }
-        solLabel.text = "Sol \(solDescription?.sol ?? 0)"
+        title = "Sol \(solDescription?.sol ?? 0)"
     }
     
     private func loadImage(forCell cell: ImageCollectionViewCell, forItemAt indexPath: IndexPath) {
@@ -140,14 +147,24 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
             return
         }
         
+        if isUITesting {
+            self.loadLocalImage(for: cell, for: indexPath)
+            return
+        }
+        
         // Start an operation to fetch image data
         let fetchOp = FetchPhotoOperation(photoReference: photoReference)
+        let filterOp = FilterImageOperation(fetchOperation: fetchOp)
+        filterOp.completionBlock = {
+            NSLog("Filter op finished")
+        }
         let cacheOp = BlockOperation {
-            if let image = fetchOp.image {
+            if let image = filterOp.image {
                 self.cache.cache(value: image, for: photoReference.id)
             }
         }
         let completionOp = BlockOperation {
+            NSLog("Completed")
             defer { self.operations.removeValue(forKey: photoReference.id) }
             
             if let currentIndexPath = self.collectionView?.indexPath(for: cell),
@@ -155,19 +172,40 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
                 return // Cell has been reused
             }
             
-            if let image = fetchOp.image {
+            if let image = filterOp.image {
                 cell.imageView.image = image
             }
         }
         
-        cacheOp.addDependency(fetchOp)
-        completionOp.addDependency(fetchOp)
+        filterOp.addDependency(fetchOp)
+        cacheOp.addDependency(filterOp)
+        completionOp.addDependency(filterOp)
         
         photoFetchQueue.addOperation(fetchOp)
         photoFetchQueue.addOperation(cacheOp)
+        imageFilteringQueue.addOperation(filterOp)
         OperationQueue.main.addOperation(completionOp)
         
         operations[photoReference.id] = fetchOp
+    }
+    
+    // MARK: - UI Testing Methods
+    
+    func loadLocalImage(for cell: ImageCollectionViewCell, for indexPath: IndexPath) {
+        
+        let photoRef = photoReferences[indexPath.row]
+        
+        guard let url = Bundle.main.url(forResource: "\(photoRef.id)", withExtension: "jpg", subdirectory: "Sol\(photoRef.sol)Photos") else { return }
+        
+        do {
+            let imageData = try Data(contentsOf: url)
+            
+            let image = UIImage(data: imageData)
+            
+            cell.imageView.image = image
+        } catch {
+            NSLog("Unable to initialize data with URL: \(url), error: \(error)")
+        }
     }
     
     // Properties
@@ -175,11 +213,12 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     private let client = MarsRoverClient()
     private let cache = Cache<Int, UIImage>()
     private let photoFetchQueue = OperationQueue()
+    private let imageFilteringQueue = OperationQueue()
     private var operations = [Int : Operation]()
     
     private var roverInfo: MarsRover? {
         didSet {
-            solDescription = roverInfo?.solDescriptions[0]
+            solDescription = roverInfo?.solDescriptions[1]
         }
     }
     

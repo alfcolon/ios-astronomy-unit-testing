@@ -14,6 +14,11 @@ class MarsRoverClient {
                         using session: URLSession = URLSession.shared,
                         completion: @escaping (MarsRover?, Error?) -> Void) {
         
+        if isUITesting {
+            localMarsRover(completion: completion)
+            return
+        }
+        
         let url = self.url(forInfoForRover: name)
         fetch(from: url, using: session) { (dictionary: [String : MarsRover]?, error: Error?) in
 
@@ -25,11 +30,36 @@ class MarsRoverClient {
         }
     }
     
+    func localMarsRover(completion: @escaping (MarsRover?, Error?) -> Void) {
+        
+        guard let roverURL = Bundle.main.url(forResource: "MarsRover", withExtension: "json", subdirectory: nil) else { fatalError("URL to local Rover JSON is nil") }
+        
+        do {
+            let data = try Data(contentsOf: roverURL)
+            
+            let jsonDecoder = MarsPhotoReference.jsonDecoder
+            
+            let rover = try jsonDecoder.decode([String: MarsRover].self, from: data)["photo_manifest"]
+            
+            completion(rover, nil)
+            
+        } catch {
+            NSLog("Error loading local Mars Rover: \(error)")
+            completion(nil, error)
+        }
+        
+    }
+    
     func fetchPhotos(from rover: MarsRover,
                      onSol sol: Int,
                      using session: URLSession = URLSession.shared,
                      completion: @escaping ([MarsPhotoReference]?, Error?) -> Void) {
         
+        if isUITesting {
+            fetchLocalPhotos(from: rover, onSol: sol, completion: completion)
+            return
+        }
+
         let url = self.url(forPhotosfromRover: rover.name, on: sol)
         fetch(from: url, using: session) { (dictionary: [String : [MarsPhotoReference]]?, error: Error?) in
             guard let photos = dictionary?["photos"] else {
@@ -37,6 +67,28 @@ class MarsRoverClient {
                 return
             }
             completion(photos, nil)
+        }
+    }
+    
+    func fetchLocalPhotos(from rover: MarsRover,
+                          onSol sol: Int,
+                          completion: @escaping ([MarsPhotoReference]?, Error?) -> Void) {
+        
+        guard let localPhotosURL = Bundle.main.url(forResource: "PhotoReferences", withExtension: "json") else { fatalError("PhotoReferences.json URL is nil") }
+        
+        do {
+            let data = try Data(contentsOf: localPhotosURL)
+            
+            let jsonDecoder = MarsPhotoReference.jsonDecoder
+            
+            let references = try jsonDecoder.decode([String: [String: [MarsPhotoReference]]].self, from: data)
+            
+            let photos = references["\(sol)"]?["photos"]
+            
+            completion(photos, nil)
+        } catch {
+            NSLog("Unable to fetch local photos for sol \(sol): \(error)")
+            completion(nil, error)
         }
     }
     

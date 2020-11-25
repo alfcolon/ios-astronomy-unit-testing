@@ -18,17 +18,33 @@ class PhotoDetailViewController: UIViewController {
     
     @IBAction func save(_ sender: Any) {
         guard let image = imageView.image else { return }
-        PHPhotoLibrary.shared().performChanges({
-            PHAssetChangeRequest.creationRequestForAsset(from: image)
-        }, completionHandler: { (success, error) in
-            if let error = error {
-                NSLog("Error saving photo: \(error)")
+        PHPhotoLibrary.requestAuthorization { (status) in
+            guard status == .authorized else {
+                self.presentFailedSaveAlert()
                 return
             }
-            DispatchQueue.main.async {
-                self.presentSuccessfulSaveAlert()
-            }
-        })
+            
+            PHPhotoLibrary.shared().performChanges({
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            }, completionHandler: { (success, error) in
+                if let error = error {
+                    NSLog("Error saving photo: \(error)")
+                    return
+                }
+                DispatchQueue.main.async {
+                    self.presentSuccessfulSaveAlert()
+                }
+            })
+        }
+    }
+    
+    func presentFailedSaveAlert() {
+        let alert = UIAlertController(title: "Unable to save photo", message: "Please grant Photo Library permissions to save photos!", preferredStyle: .alert)
+        let okayAction = UIAlertAction(title: "Okay", style: .default, handler: nil)
+        
+        alert.addAction(okayAction)
+        
+        present(alert, animated: true, completion: nil)
     }
     
     func presentSuccessfulSaveAlert() {
@@ -46,7 +62,7 @@ class PhotoDetailViewController: UIViewController {
         guard let photo = photo, isViewLoaded else { return }
         do {
             let data = try Data(contentsOf: photo.imageURL.usingHTTPS!)
-            imageView.image = UIImage(data: data)
+            imageView.image = UIImage(data: data)?.filtered()
             let dateString = dateFormatter.string(from: photo.earthDate)
             detailLabel.text = "Taken by \(photo.camera.roverId) on \(dateString) (Sol \(photo.sol))"
             cameraLabel.text = photo.camera.fullName
